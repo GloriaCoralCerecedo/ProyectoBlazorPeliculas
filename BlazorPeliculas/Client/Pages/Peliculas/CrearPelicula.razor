@@ -1,0 +1,45 @@
+﻿@page "/peliculas/crear"
+@inject NavigationManager navigationManager
+@inject IRepositorio repositorio
+@inject SweetAlertService swal
+
+<h3>Crear Pelicula</h3>
+
+@if (MostrarFormulario)
+{
+    <FormularioPeliculas Pelicula="Pelicula" OnValidSubmit="Crear"
+                     GeneroNoSeleccionados="GenerosNoSeleccionados">
+    </FormularioPeliculas>
+}
+else
+{
+    <p>Cargando...</p>
+}
+
+@code {
+    private Pelicula Pelicula = new Pelicula();
+    private List<Genero> GenerosNoSeleccionados = new List<Genero>();
+    public bool MostrarFormulario { get; set; }
+
+    protected async override Task OnInitializedAsync()
+    {
+        var respuestaHTTP = await repositorio.Get<List<Genero>>("api/generos");
+        GenerosNoSeleccionados = respuestaHTTP.Response!;
+        MostrarFormulario = true;
+    }
+
+    async Task Crear()
+    {
+        var httpResponse = await repositorio.Post<Pelicula, int>("api/Peliculas", Pelicula);
+        if (httpResponse.Error)
+        {
+            var mensajeError = await httpResponse.ObtenerMensajeError();
+            await swal.FireAsync("Error", mensajeError, SweetAlertIcon.Error);
+        }
+        else
+        {
+            var peliculaId = httpResponse.Response;
+            navigationManager.NavigateTo($"/pelicula/{peliculaId}/{Pelicula.Titulo.Replace(" ", "-")}");
+        }   
+    }
+}

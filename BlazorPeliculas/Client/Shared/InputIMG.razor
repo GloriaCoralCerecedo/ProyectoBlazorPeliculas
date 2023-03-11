@@ -1,0 +1,53 @@
+﻿<div>
+    <label>@Label</label>
+    <div>
+        <InputFile OnChange="OnChange" accept=".jpg,.jpeg,.png"/>
+    </div>
+</div>
+<div>
+    @if (img is not null)
+    {
+        <div>
+            <div style="margin: 10px">
+                <img src="data:image/jpeg;base64, @img" style="width: 400px"/>
+            </div>
+        </div>
+    }
+    @if (ImagenByte is not null)
+    {
+        <div>
+            <div style="margin: 10px">
+                <img src="data:image/jpeg;base64, @(Convert.ToBase64String(ImagenByte))" style="width: 400px" />
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "Imagen";
+    [Parameter] public byte[]? ImagenByte { get; set; }
+    [Parameter] public EventCallback<byte[]> ImagenSeleccionada2 { get; set; }
+    private byte[]? imagenByte;
+    private string? img;
+    async Task OnChange(InputFileChangeEventArgs e)
+    {
+        var imagenes = e.GetMultipleFiles();
+
+        foreach (var imagen in imagenes)
+        {
+            using (var stream = imagen.OpenReadStream())
+            {
+                using (var memoryStream = new MemoryStream())
+                {
+                    await stream.CopyToAsync(memoryStream);
+                    await imagen.OpenReadStream().ReadAsync(imagenByte);
+                    imagenByte = memoryStream.ToArray();
+                    img = Convert.ToBase64String(imagenByte);
+                    ImagenByte = null;
+                    await ImagenSeleccionada2.InvokeAsync(imagenByte);
+                    StateHasChanged();
+                }
+            }
+        }
+    }
+}
