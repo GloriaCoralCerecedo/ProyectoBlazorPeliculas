@@ -2,6 +2,9 @@
 using BlazorPeliculas.Server.Helpers;
 using BlazorPeliculas.Shared.DTOs;
 using BlazorPeliculas.Shared.Entidades;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,17 +12,21 @@ namespace BlazorPeliculas.Server.Controllers
 {
     [ApiController]
     [Route("api/peliculas")]
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme, Roles = "admin")]
     public class PeliculasController : ControllerBase
     {
         private readonly ApplicationDBContext context;
         private readonly IMapper mapper;
+        private readonly UserManager<IdentityUser> userManager;
 
-        public PeliculasController(ApplicationDBContext context, IMapper mapper)
+        public PeliculasController(ApplicationDBContext context, IMapper mapper, UserManager<IdentityUser> userManager)
         {
             this.context = context;
             this.mapper = mapper;
+            this.userManager = userManager;
         }
         [HttpGet]
+        [AllowAnonymous]
         public async Task<ActionResult<HomePageDTO>> Get()
         {
             var limite = 6;
@@ -45,6 +52,7 @@ namespace BlazorPeliculas.Server.Controllers
         }
 
         [HttpGet("{id:int}")]
+        [AllowAnonymous]
         public async Task<ActionResult<PeliculaVisualizarDTO>> Get(int id)
         {
             var pelicula = await context.Peliculas.Where(pelicula =>pelicula.Id == id)
@@ -59,9 +67,30 @@ namespace BlazorPeliculas.Server.Controllers
                 return NotFound();
             }
 
-            //TODO: Sistema de votacion
-            var promedioVoto = 4;
-            var votoUsario = 5;
+            var promedioVoto = 0.0;
+            var votoUsario = 0;
+
+            if (await context.VotosPeliculas.AnyAsync(x => x.PeliculaId == id))
+            {
+                promedioVoto = await context.VotosPeliculas.Where(x => x.PeliculaId == id)
+                    .AverageAsync(x => x.Voto);
+                if (HttpContext.User.Identity!.IsAuthenticated)
+                {
+                    var usuario = await userManager.FindByEmailAsync(HttpContext.User.Identity!.Name!);
+                    if (usuario is null)
+                    {
+                        return BadRequest("Usuario no encontrada");
+                    }
+                    var usuarioId = usuario.Id;
+
+                    var votoUsuarioDB = await context.VotosPeliculas
+                        .FirstOrDefaultAsync(x => x.PeliculaId == id && x.UsuarioId== usuarioId);
+                    if(votoUsuarioDB is not null)
+                    {
+                        votoUsario = votoUsuarioDB.Voto;
+                    }
+                }
+            }
 
             var modelo = new PeliculaVisualizarDTO();
             modelo.Pelicula= pelicula;
@@ -80,6 +109,7 @@ namespace BlazorPeliculas.Server.Controllers
         }
 
         [HttpGet("filtrar")]
+        [AllowAnonymous]
         public async Task<ActionResult<List<Pelicula>>> Get([FromQuery] ParametrosBusquedaPeliculasDTO modelo)
         {
             var peliculasQueryable = context.Peliculas.AsQueryable();
@@ -102,7 +132,11 @@ namespace BlazorPeliculas.Server.Controllers
                 peliculasQueryable = peliculasQueryable.Where(x => x.GenerosPelicula.Select(y => y.GeneroId).Contains(modelo.GeneroId));
 ;           }
 
-            //TODO: Implementar votacion
+            if (modelo.MasVotadas)
+            {
+                peliculasQueryable = peliculasQueryable.OrderByDescending(p =>
+                    p.VotosPeliculas.Average(vp => vp.Voto));
+            }
 
             await HttpContext.InsertarParametrosPaginacionEnRespuesta(peliculasQueryable, modelo.CantidadRegistros);
             var peliculas = await peliculasQueryable.Paginar(modelo.PaginacionDTO).ToListAsync();
@@ -175,7 +209,6 @@ namespace BlazorPeliculas.Server.Controllers
             {
                 var posterPelicula = Convert.ToBase64String(pelicula.Poster2);
                 peliculaDB.Poster = posterPelicula;
-
             }
 
             EscribirOrdenActores(peliculaDB);
@@ -194,7 +227,9 @@ namespace BlazorPeliculas.Server.Controllers
                 return NotFound();
             }
             context.Remove(pelicula);
+
             await context.SaveChangesAsync();
+
             if (pelicula.Poster2 is not null)
             {
                 var fotoActor = Convert.ToBase64String(pelicula.Poster2);
